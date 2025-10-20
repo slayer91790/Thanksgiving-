@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holguin Thanksgiving 2025 Potluck</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Configure Tailwind for custom theme (Mexican/Harvest) -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'terra-cotta': '#B45309', // Orange-800
+                        'deep-red': '#991B1B', // Red-800
+                        'jade-green': '#065F46', // Emerald-800
+                        'harvest-gold': '#FCD34D', // Amber-300
+                        'cream-bg': '#FAF8F1', // Off-white background
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        serif: ['Georgia', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar styling for aesthetics */
+        .scroll-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .scroll-container::-webkit-scrollbar-thumb {
+            background-color: #B45309; /* Terra-cotta */
+            border-radius: 4px;
+        }
+        .scroll-container::-webkit-scrollbar-track {
+            background: #F3F4F6;
+        }
+    </style>
+</head>
+<body class="bg-cream-bg font-sans min-h-screen p-4 flex flex-col items-center">
+
+    <!-- Firebase Imports and Initialization -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // =========================================================================
+        // !!! IMPORTANT: PASTE YOUR ACTUAL FIREBASE CONFIGURATION HERE !!!
+        // =========================================================================
+        const firebaseConfig = {
+            // PASTE THE ENTIRE OBJECT YOU COPIED FROM THE FIREBASE CONSOLE HERE
+            // Example based on your screenshot (you must complete the apiKey):
+            // apiKey: "AIzaSyB...", 
+            // authDomain: "family-thanksgiving.firebaseapp.com", 
+            // projectId: "family-thanksgiving", 
+            // storageBucket: "family-thanksgiving.appspot.com",
+            // messagingSenderId: "399598263193",
+            // appId: "1:399598263193:web:0dcb79d5cdc53514277d6fd",
+            // measurementId: "G-LXV0YGPQ"
+        };
+        // =========================================================================
+        
+        // Static collection path that matches the Firestore Security Rules set in Step 2.
+        const POTLUCK_COLLECTION_PATH = `potluck_items`;
+        
+        // Global variables for Firebase services
+        let db;
+        let auth;
+        let userId;
+
+        /**
+         * Initializes Firebase app, authenticates user, and sets up Firestore.
+         */
+        async function initializeFirebase() {
+            // A simple check to see if the user replaced the config
+            if (!firebaseConfig.projectId || firebaseConfig.projectId === "YOUR_PROJECT_ID_HERE") {
+                console.error("Firebase config is missing or incomplete. Cannot initialize.");
+                document.getElementById('loading-message').textContent = "ERROR: Please update the Firebase Config in the code (Step 3).";
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Sign in anonymously for simple public access
+                await signInAnonymously(auth);
+                
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+                console.log("Firebase initialized and authenticated anonymously.");
+                
+                // Start listening for real-time updates
+                setupRealtimeListener();
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                const messageBox = document.getElementById('message-box');
+                messageBox.textContent = "Error connecting to database. Please check your config and refresh.";
+                messageBox.className = 'mt-4 p-3 rounded-lg text-center text-sm font-medium bg-red-100 text-red-700';
+            }
+        }
+
+        /**
+         * Sets up a real-time listener for the potluck submissions.
+         */
+        function setupRealtimeListener() {
+            if (!db) return;
+            
+            // The query orders submissions by the server timestamp (when they were created)
+            const q = query(collection(db, POTLUCK_COLLECTION_PATH));
+
+            // Use onSnapshot to get real-time updates
+            onSnapshot(q, (snapshot) => {
+                const submissions = [];
+                snapshot.forEach((doc) => {
+                    submissions.push({ id: doc.id, ...doc.data() });
+                });
+                renderSubmissions(submissions);
+            }, (error) => {
+                console.error("Error listening to Firestore:", error);
+            });
+        }
+
+        /**
+         * Renders the list of current submissions to the DOM.
+         */
+        function renderSubmissions(submissions) {
+            const submissionList = document.getElementById('submission-list');
+            submissionList.innerHTML = ''; // Clear existing list
+
+            if (submissions.length === 0) {
+                submissionList.innerHTML = '<p class="text-center text-gray-500 italic p-4">Be the first to sign up!</p>';
+                return;
+            }
+
+            // Group submissions by category
+            const grouped = submissions.reduce((acc, sub) => {
+                const category = sub.category;
+                if (!acc[category]) {
+                    acc[category] = [];
+                }
+                acc[category].push(sub);
+                return acc;
+            }, {});
+
+            // Define order for display
+            const categoryOrder = ["Main Dish", "Side Dish/Dessert", "Essentials & Supplies", "Not Bringing Item"];
+
+            categoryOrder.forEach(category => {
+                if (grouped[category] && grouped[category].length > 0) {
+                    // Create category header
+                    const header = document.createElement('h3');
+                    header.className = 'text-lg font-bold text-deep-red pt-3 border-t border-gray-300 mt-3';
+                    header.textContent = category;
+                    submissionList.appendChild(header);
+
+                    // List items within the category
+                    grouped[category].forEach(sub => {
+                        const listItem = document.createElement('div');
+                        listItem.className = 'flex justify-between items-center bg-cream-bg p-3 rounded-lg shadow-inner border border-harvest-gold';
+                        
+                        let itemText = sub.item || 'Attending Only'; // Handle the 'Not Bringing Item' case
+                        
+                        listItem.innerHTML = `
+                            <div class="flex-grow">
+                                <span class="font-medium text-gray-800">${itemText}</span>
+                                <span class="text-sm text-gray-500 block">by ${sub.name}</span>
+                            </div>
+                            <div class="flex-shrink-0 text-right">
+                                <span class="text-xs font-semibold text-jade-green">${sub.count} Attending</span>
+                            </div>
+                        `;
+                        submissionList.appendChild(listItem);
+                    });
+                }
+            });
+        }
+        
+        // Expose function for the form to use
+        window.addPotluckSubmission = async function(submission) {
+             if (!db) {
+                console.error("Database not initialized. Cannot submit.");
+                showMessage("Cannot connect to the sign-up database. Try refreshing.", 'bg-red-100 text-red-700');
+                return false;
+            }
+            try {
+                // Add the submission to Firestore
+                await addDoc(collection(db, POTLUCK_COLLECTION_PATH), {
+                    ...submission,
+                    timestamp: serverTimestamp(), // Use server time for accurate sorting
+                    userId: userId, // Record which user submitted it (for future potential edits)
+                });
+                showMessage("¡Gracias! Your sign-up was successful and updated in real-time.", 'bg-jade-green text-white');
+                return true;
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                showMessage("Submission failed. Check your console for details.", 'bg-red-100 text-red-700');
+                return false;
+            }
+        };
+
+        // Initialize Firebase on load
+        window.onload = initializeFirebase;
+
+    </script>
+    
+    <!-- Header and Introduction -->
+    <header class="w-full max-w-lg text-center mb-6 pt-4">
+        <h1 class="text-4xl font-serif font-bold text-terra-cotta mb-2">🇲🇽 Holguin Thanksgiving 2025 🦃</h1>
+        <p class="text-deep-red font-medium text-lg">Potluck Sign-Up & Feast Planner</p>
+    </header>
+
+    <!-- Main Form Container -->
+    <div id="form-container" class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg mb-8 border-t-4 border-jade-green">
+
+        <form id="potluck-form" class="space-y-5">
+            <!-- Family Name Input -->
+            <div>
+                <label for="family-name" class="block text-sm font-semibold text-gray-700 mb-1">Your Family Name</label>
+                <input type="text" id="family-name" required placeholder="e.g., The Holguin Family"
+                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-jade-green focus:border-jade-green shadow-sm">
+            </div>
+
+            <!-- Question 1: Headcount -->
+            <div>
+                <label for="headcount" class="block text-sm font-semibold text-gray-700 mb-1">How many people from your family are attending?</label>
+                <input type="number" id="headcount" required min="1" value="1"
+                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-jade-green focus:border-jade-green shadow-sm">
+            </div>
+
+            <!-- Question 2: Category Dropdown (Thematic Options) -->
+            <div>
+                <label for="category" class="block text-sm font-semibold text-gray-700 mb-1">What will you be bringing?</label>
+                <select id="category" required onchange="toggleWriteIn()"
+                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-jade-green focus:border-jade-green shadow-sm appearance-none bg-white">
+                    <option value="" disabled selected>-- Select a Category --</option>
+                    <option value="Main Dish">Main Dish (Turkey, Ham, Tamales, etc.)</option>
+                    <option value="Side Dish/Dessert">Side Dish or Dessert (Mashed Potatoes, Mole Gravy, Flan, etc.)</option>
+                    <option value="Essentials & Supplies">Essentials & Supplies (Plates, Ice, Drinks)</option>
+                    <option value="Not Bringing Item">Not Bringing Item / Just Attending</option>
+                </select>
+            </div>
+
+            <!-- Conditional Write-In Field -->
+            <div id="write-in-field" class="hidden">
+                <label for="item-details" class="block text-sm font-semibold text-gray-700 mb-1">
+                    Please specify the item you are bringing (e.g., *20lb Pavochón-style Turkey*, *Abuela's Mole Gravy*, *Disposable Cups*).
+                </label>
+                <input type="text" id="item-details" placeholder="Specify your festive dish or supply"
+                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-jade-green focus:border-jade-green shadow-sm">
+            </div>
+
+            <!-- Submission Button -->
+            <button type="submit" id="submit-button" class="w-full bg-terra-cotta text-white py-3 rounded-xl font-bold text-lg hover:bg-deep-red transition duration-200 shadow-md">
+                Confirm Sign-Up
+            </button>
+            <div id="message-box" class="mt-4 p-3 hidden rounded-lg text-center text-sm font-medium"></div>
+
+        </form>
+    </div>
+
+    <!-- Submission List -->
+    <div class="w-full max-w-lg mb-8">
+        <h2 class="text-2xl font-serif font-bold text-jade-green mb-4 text-center border-b border-harvest-gold pb-2">Currently Claimed Items</h2>
+        <div id="submission-list" class="space-y-3 scroll-container max-h-96 overflow-y-auto p-2">
+            <!-- Items will be injected here by JavaScript's onSnapshot listener -->
+            <p id="loading-message" class="text-center text-gray-500 italic p-4">Connecting to the feast list...</p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('potluck-form');
+        const categorySelect = document.getElementById('category');
+        const writeInField = document.getElementById('write-in-field');
+        const itemDetailsInput = document.getElementById('item-details');
+        const messageBox = document.getElementById('message-box');
+        const submitButton = document.getElementById('submit-button');
+
+        /**
+         * Toggles the visibility and requirement of the write-in field.
+         */
+        function toggleWriteIn() {
+            const selectedCategory = categorySelect.value;
+            const requiresDetail = selectedCategory !== 'Not Bringing Item' && selectedCategory !== '';
+
+            if (requiresDetail) {
+                writeInField.classList.remove('hidden');
+                itemDetailsInput.setAttribute('required', 'required');
+            } else {
+                writeInField.classList.add('hidden');
+                itemDetailsInput.removeAttribute('required');
+                itemDetailsInput.value = ''; // Clear value if hidden
+            }
+        }
+
+        /**
+         * Handles the form submission logic.
+         */
+        async function handleSubmit(e) {
+            e.preventDefault();
+            submitButton.disabled = true;
+            submitButton.textContent = "Submitting...";
+
+            const familyName = document.getElementById('family-name').value.trim();
+            const headcount = parseInt(document.getElementById('headcount').value, 10);
+            const category = categorySelect.value;
+            const itemDetails = itemDetailsInput.value.trim();
+
+            if (!familyName || !headcount || !category) {
+                showMessage("Please fill out all required fields.", 'bg-red-100 text-red-700');
+                submitButton.disabled = false;
+                submitButton.textContent = "Confirm Sign-Up";
+                return;
+            }
+
+            if (category !== 'Not Bringing Item' && !itemDetails) {
+                 showMessage("Please specify the item you are bringing.", 'bg-red-100 text-red-700');
+                submitButton.disabled = false;
+                submitButton.textContent = "Confirm Sign-Up";
+                return;
+            }
+
+            const newSubmission = {
+                name: familyName,
+                count: headcount,
+                category: category,
+                item: category === 'Not Bringing Item' ? 'Attending Only' : itemDetails,
+            };
+
+            const success = await window.addPotluckSubmission(newSubmission);
+            
+            if (success) {
+                // Only reset form on successful database write
+                form.reset();
+                toggleWriteIn(); 
+            }
+            
+            submitButton.disabled = false;
+            submitButton.textContent = "Confirm Sign-Up";
+        }
+        
+        /**
+         * Displays a temporary success or error message.
+         */
+        function showMessage(message, classes) {
+            messageBox.textContent = message;
+            messageBox.className = `mt-4 p-3 rounded-lg text-center text-sm font-medium ${classes}`;
+            messageBox.classList.remove('hidden');
+
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 7000);
+        }
+
+        // Attach event listeners
+        window.addEventListener('load', () => {
+            form.addEventListener('submit', handleSubmit);
+            categorySelect.addEventListener('change', toggleWriteIn);
+            toggleWriteIn(); // Initialize state
+        });
+
+    </script>
+</body>
+</html>
+
